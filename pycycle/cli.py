@@ -7,7 +7,7 @@ import os
 import sys
 
 # local imports
-from .__version__ import __version__
+from pycycle.__version__ import __version__
 from pycycle.utils import read_project, get_cycle_path, check_if_cycles_exist
 
 
