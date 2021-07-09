@@ -84,3 +84,6 @@ def cli(ctx, verbose=False, help=False, source=None, here=False, ignore='', enco
             click.echo(crayons.green("Finished."))
             sys.exit(0)
 
+
+if __name__ == '__main__':
+    cli()
