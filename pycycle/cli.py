@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import print_function
 
+from pathlib import Path
+from typing import Optional
+
 import click
 import crayons
 import os
@@ -8,10 +11,12 @@ import sys
 
 # local imports
 from pycycle.__version__ import __version__
-from pycycle.utils import read_project, get_cycle_path, check_if_cycles_exist
+from pycycle.projectimportgraph import ProjectImportGraph
+
+IGNORE_PATTERN_SEP: str = ','
 
 
-def format_help(_help):
+def format_help(_help: str) -> str:
     """Formats the help string."""
     additional_help = """
     Examples:
@@ -40,20 +45,36 @@ Options:""".format(
 @click.option('--verbose', is_flag=True, default=False, help="Verbose output.")
 @click.option('--here', is_flag=True, default=False, help="Try to find cycles in the current project.")
 @click.option('--source', default='', help="Try to find cycles in the path provided.", type=str)
-@click.option('--ignore', default='', help="Comma separated directories that will be ignored during analysis.")
-@click.option('--encoding', default=None, help="Change enconding with which the project is read.")
+@click.option('--ignore', default=None, help="Comma separated directory names that will be ignored during analysis.")
+@click.option('--encoding', default='utf-8', help="Change encoding with which the project is read.")
+@click.option('--force-rootfile', default='', help="Force to start building of the ast import tree at a file with this filename.",
+              type=str)
+@click.option('--skipfail', is_flag=True, default=False,
+              help="Flag to disable the raising of any exceptions occuring during parsing.")
 @click.option('--help', is_flag=True, default=None, help="Show this message then exit.")
 @click.version_option(prog_name=crayons.yellow('pycycle'), version=__version__)
 @click.pass_context
-def cli(ctx, verbose=False, help=False, source=None, here=False, ignore='', encoding=None):
+def cli(ctx: click.core.Context,
+        verbose: bool = False,
+        source: str = '',
+        here: bool = False,
+        ignore: Optional[str] = None,
+        encoding: str = 'utf-8',
+        force_rootfile: Optional[str] = None,
+        skipfail: bool = False,
+        help: bool = False) -> None:
+
+    ignore_cliargs: set[str] = set() if ignore is None else set(ignore.split(IGNORE_PATTERN_SEP))
+
     if ctx.invoked_subcommand is None:
 
+        source: Path = Path(source)
         if source:
-            source = os.path.abspath(source)
+            source = source.absolute()
             click.echo(crayons.yellow(
                 'Target source provided: {}'.format(source)))
         elif here:
-            source = os.getcwd()
+            source = Path(os.getcwd())
         else:
             # Display help to user, if no commands were passed.
             click.echo(format_help(ctx.get_help()))
@@ -63,18 +84,31 @@ def cli(ctx, verbose=False, help=False, source=None, here=False, ignore='', enco
             click.echo(crayons.red(
                 'No project provided. Provide either --here or --source.'))
 
-        if not os.path.isdir(source):
-            click.echo(crayons.red('Directory does not exist.'), err=True)
+        if not source.exists():
+            click.echo(crayons.red('Source file/directory does not exist.'), err=True)
             sys.exit(1)
+        elif source.is_file():
+            click.echo(crayons.red("A source file was passed; using it's parent directory"))
+            source = source.parent
+        elif not source.is_dir():
+            click.echo(crayons.red('Source was neither a file nor directory.'), err=True)
+            sys.exit()
 
-        root_node = read_project(source, verbose=verbose, ignore=ignore.split(','), encoding=encoding)
+        project = ProjectImportGraph(encoding=encoding,
+                                     rootfile=force_rootfile,
+                                     verbose=verbose,
+                                     skipfail=skipfail,
+                                     ignore_dirnames=ignore_cliargs)
+        root_node = project.read_project(source)
+
 
         click.echo(crayons.yellow(
-            'Project successfully transformed to AST, checking imports for cycles..'))
+            'ProjectReader successfully transformed to AST, checking imports for cycles..'))
 
-        if check_if_cycles_exist(root_node):
+        if project.check_if_cycles_exist(root_node):
             click.echo(crayons.red('Cycle Found :('))
-            click.echo(crayons.red(get_cycle_path(root_node)))
+            result = project.get_cycle_path(root_node)
+            click.echo(crayons.red(result))
             click.echo(crayons.green("Finished."))
             sys.exit(1)
         else:
